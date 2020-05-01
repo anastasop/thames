@@ -2,7 +2,7 @@
 
 Thames is a browser and player for the BBC Sound Effects collection which
 contains sounds from cafes, markets, cars, typewriters, nature etc.
-You can browse the collection online at http://thames.acropolis.org.uk/.
+You can browse the collection online at http://bbcsfx.acropolis.org.uk/.
 
 Thames creates an index for the collection in an sqlite3 database, makes
 full text queries to it and downloads and plays the sounds. Each query is an
