@@ -23,7 +23,7 @@ const (
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: thames [-n N] [-d] [--query] [--shuffle] [--mix] queries...
+	fmt.Fprintf(os.Stderr, `usage: thames [-r root] [-n N] [-d] [--query] [--shuffle] [--mix] queries...
 
 Thames is a browser and player for the BBC Sound Effects collection which
 contains sounds from cafes, markets, cars, typewriters, nature etc.
@@ -72,6 +72,7 @@ Flags:
 }
 
 var (
+	rootDir      = flag.String("r", "", "Directory to store audio files")
 	nsounds      = flag.Int("n", 30, "Number of sounds to play for each query")
 	onlyQuery    = flag.Bool("query", false, "Only query and print the results, don't download, don't play")
 	onlyDownload = flag.Bool("d", false, "Only query and download the results, don't play")
@@ -166,7 +167,7 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	prepareWorkDirectory()
+	prepareWorkDirectory(*rootDir)
 
 	db, err := sql.Open("sqlite3", "file:"+dbFile)
 	if err != nil {
@@ -301,15 +302,19 @@ func downloadFile(fpath, url string) error {
 // os.UserCacheDir()/thames/BBCSoundEffects.csv the sounds csv from BBC
 // os.UserCacheDir()/thames/sounds.db           a sqlite3 database for the csv
 // os.UserCacheDir()/thames/sounds/             a directory with wavs downloaded on demand
-func prepareWorkDirectory() {
-	cdir, err := os.UserCacheDir()
-	if err != nil {
-		log.Fatal(err)
-	}
+func prepareWorkDirectory(root string) {
+	if root == "" {
+		cdir, err := os.UserCacheDir()
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	workDir = filepath.Join(cdir, "thames")
-	if err := os.Mkdir(workDir, os.ModePerm); err != nil && !os.IsExist(err) {
-		log.Fatal(err)
+		workDir = filepath.Join(cdir, "thames")
+		if err := os.Mkdir(workDir, os.ModePerm); err != nil && !os.IsExist(err) {
+			log.Fatal(err)
+		}
+	} else {
+		workDir = root
 	}
 
 	soundsDir = filepath.Join(workDir, "sounds")
