@@ -5,9 +5,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,26 +16,20 @@ import (
 )
 
 const (
-	AssetsRoot        = `http://bbcsfx.acropolis.org.uk/assets/`
 	PlayerChannelSize = 30
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: thames [-r root] [-n N] [-d] [--query] [--shuffle] [--mix] queries...
+	fmt.Fprintf(os.Stderr, `usage: thames [-r root] [-n N] [--query] [--shuffle] [--mix] queries...
 
 Thames is a browser and player for the BBC Sound Effects collection which
 contains sounds from cafes, markets, cars, typewriters, nature etc.
 You can browse the collection online at http://thames.acropolis.org.uk/.
 
 Thames creates an index for the collection in an sqlite3 database, makes
-full text queries to it and downloads and plays the sounds. Each query is an
+full text queries to it and plays the sounds. Each query is an
 sqlite3 full text query and is applied verbatim. Usually it is a single term
 or a phrase but you can also use NEAR queries.
-
-For the first run, it downloads the index from BBC and creates the database,
-so it will be a bit slow. During playback, the sounds are downloaded in the
-background so ideally, depending on the sound and download durations, there
-will be no delay in playback except for the first sound.
 
 Some examples
 
@@ -72,21 +64,14 @@ Flags:
 }
 
 var (
-	rootDir      = flag.String("r", "", "Directory to store audio files")
-	nsounds      = flag.Int("n", 30, "Number of sounds to play for each query")
-	onlyQuery    = flag.Bool("query", false, "Only query and print the results, don't download, don't play")
-	onlyDownload = flag.Bool("d", false, "Only query and download the results, don't play")
-	shuffle      = flag.Bool("shuffle", false, "Interleave sounds from queries")
-	mix          = flag.Bool("mix", false, "Mix the sounds from queries")
+	rootDir   = flag.String("r", "", "Directory of audio files")
+	nsounds   = flag.Int("n", 30, "Number of sounds to play for each query")
+	onlyQuery = flag.Bool("query", false, "Only query and print the results, don't download, don't play")
+	shuffle   = flag.Bool("shuffle", false, "Interleave sounds from queries")
+	mix       = flag.Bool("mix", false, "Mix the sounds from queries")
 
-	workDir   string
 	soundsDir string
-	dbFile    string
 )
-
-func assetUrl(asset string) string {
-	return AssetsRoot + asset
-}
 
 func soundPath(fname string) string {
 	return filepath.Join(soundsDir, fname)
@@ -167,7 +152,12 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	prepareWorkDirectory(*rootDir)
+	soundsDir = filepath.Join(*rootDir, "sounds")
+	dbFile := filepath.Join(*rootDir, "sounds.db")
+	csvFile := filepath.Join(*rootDir, "BBCSoundEffects.csv")
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		initDatabase(dbFile, csvFile)
+	}
 
 	db, err := sql.Open("sqlite3", "file:"+dbFile)
 	if err != nil {
@@ -189,7 +179,7 @@ func main() {
 					if _, err := os.Stat(snd.fpath); err == nil {
 						fmt.Printf("%s %s\n", snd.descr, snd.fpath)
 					} else {
-						fmt.Printf("%s %s\n", snd.descr, assetUrl(snd.fname))
+						fmt.Printf("missing: %s\n", snd.fpath)
 					}
 				}
 			}()
@@ -246,9 +236,7 @@ func main() {
 	// launch players
 	wg.Add(1)
 	go func() {
-		if *onlyDownload {
-			mockPlayer(router.route(""))
-		} else if !*mix {
+		if !*mix {
 			realPlayer(router.route(""))
 		} else {
 			for _, query := range flag.Args() {
@@ -267,76 +255,6 @@ func main() {
 
 	// at this point we are waiting the players to play all the sounds assigned to them
 	wg.Wait()
-}
-
-// downloadFile downloads from url and saves to fpath.
-func downloadFile(fpath, url string) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Response from %s is %d", url, resp.StatusCode)
-	}
-	defer resp.Body.Close()
-
-	fout, err := os.Create(fpath)
-	if err != nil {
-		return err
-	}
-	defer fout.Close()
-
-	if _, err := io.Copy(fout, resp.Body); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// prepareWorkDirectory creates and structures the directory for the application.
-// If the directory is empty, then the first time it downloads the csv file from BBC
-// and creates the sqlite3 database.
-//
-// The structure is
-// os.UserCacheDir()/thames/
-// os.UserCacheDir()/thames/BBCSoundEffects.csv the sounds csv from BBC
-// os.UserCacheDir()/thames/sounds.db           a sqlite3 database for the csv
-// os.UserCacheDir()/thames/sounds/             a directory with wavs downloaded on demand
-func prepareWorkDirectory(root string) {
-	if root == "" {
-		cdir, err := os.UserCacheDir()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		workDir = filepath.Join(cdir, "thames")
-		if err := os.Mkdir(workDir, os.ModePerm); err != nil && !os.IsExist(err) {
-			log.Fatal(err)
-		}
-	} else {
-		workDir = root
-	}
-
-	soundsDir = filepath.Join(workDir, "sounds")
-	if err := os.Mkdir(soundsDir, os.ModePerm); err != nil && !os.IsExist(err) {
-		log.Fatal(err)
-	}
-
-	csvFile := filepath.Join(workDir, "BBCSoundEffects.csv")
-	if exists, err := fileExists(csvFile); err == nil {
-		if !exists {
-			if err := downloadFile(csvFile, assetUrl("BBCSoundEffects.csv")); err != nil {
-				log.Fatal(err)
-			}
-		}
-	} else {
-		log.Fatal(err)
-	}
-
-	dbFile = filepath.Join(workDir, "sounds.db")
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		initDatabase(dbFile, csvFile)
-	}
 }
 
 // initDatabase creates the schema in an sqlite3 database and fills the tables with the sounds records from the BBC csv
@@ -419,20 +337,12 @@ func downloader(in <-chan sound, router playersRouter) {
 	defer router.close()
 
 	for snd := range in {
-		exists, err := fileExists(soundPath(snd.fname))
-		if err == nil {
-			if exists {
-				log.Printf("Cached: %q %s", snd.query, snd.descr)
-			} else {
-				log.Printf("Fetch: %q %s", snd.query, snd.descr)
-				err = downloadFile(soundPath(snd.fname), assetUrl(snd.fname))
-			}
-		}
-
-		if err == nil {
-			router.route(snd.query) <- snd
+		sp := soundPath(snd.fname)
+		exists, err := fileExists(sp)
+		if err != nil || !exists {
+			log.Printf("Missing File: %s: %v", sp, err)
 		} else {
-			log.Printf("Error:Download %v", err)
+			router.route(snd.query) <- snd
 		}
 	}
 }
